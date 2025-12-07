@@ -1,0 +1,316 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Gen3 v3 Results Viewer</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #0b0d10; color: #eaeaea; margin: 0; padding: 16px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #242a31; padding: 6px 8px; font-size: 13px; }
+    th { background: #161a1f; }
+    tr:hover { background: #1f252d; cursor: pointer; }
+    #details { margin-top: 16px; display: flex; gap: 12px; }
+    #details pre { background: #161a1f; padding: 8px; border: 1px solid #242a31; flex: 1; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h2>Gen3 v3 Results Viewer</h2>
+  <div style="margin-bottom:8px;">
+    Data file:
+    <select id="datafile" style="width:320px">
+      <option value="">-- select --</option>
+      <option value="/out/report/data_A_gen3_v3.json">data_A_gen3_v3.json</option>
+      <option value="/out/report/data_dimacs_gen3_v3.json">data_dimacs_gen3_v3.json</option>
+    </select>
+    <button onclick="loadData()">Load</button>
+    or enter path: <input id="datafile_text" style="width:280px" placeholder="override path here">
+  </div>
+  <table id="tbl">
+    <thead>
+      <tr>
+        <th>Instance</th><th>Solver</th><th>BKS</th><th>Gap %</th><th>Valid</th><th>Time ms</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div id="plot-controls" style="margin-top:12px; margin-bottom:8px;">
+    <label><input type="checkbox" id="chk-show-nodes" checked> Show node labels</label>
+    <label style="margin-left:12px;"><input type="checkbox" id="chk-hide-start" checked> Hide start depot leg</label>
+    <label style="margin-left:12px;"><input type="checkbox" id="chk-hide-end" checked> Hide end depot leg</label>
+  </div>
+  <div id="plots" style="display:flex; gap:8px; margin-bottom:8px;">
+    <div style="flex:1;">
+      <div style="font-weight:bold; margin-bottom:4px;">Solver</div>
+      <svg id="svg-solver" width="100%" height="420" style="background:#0f1318; border:1px solid #242a31;"></svg>
+    </div>
+    <div style="flex:1;">
+      <div style="font-weight:bold; margin-bottom:4px;">BKS</div>
+      <svg id="svg-bks" width="100%" height="420" style="background:#0f1318; border:1px solid #242a31;"></svg>
+    </div>
+  </div>
+  <div id="route-tables" style="display:flex; gap:8px; margin-bottom:8px;">
+    <div style="flex:1;">
+      <div style="font-weight:bold; margin-bottom:4px;">Solver routes</div>
+      <input id="solver-filter" placeholder="filter..." style="width:100%; margin-bottom:4px;">
+      <table id="tbl-solver" style="width:100%; font-size:12px;">
+        <thead><tr><th>#</th><th>Show</th><th>Route</th><th>Remain Q</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div style="flex:1;">
+      <div style="font-weight:bold; margin-bottom:4px;">BKS routes</div>
+      <input id="bks-filter" placeholder="filter..." style="width:100%; margin-bottom:4px;">
+      <table id="tbl-bks" style="width:100%; font-size:12px;">
+        <thead><tr><th>#</th><th>Show</th><th>Route</th><th>Remain Q</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="details">
+    <pre id="solver_sol">Solver solution</pre>
+    <pre id="bks_sol">BKS solution</pre>
+  </div>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script>
+    let data = null;
+    let instances = [];
+    const tbody = document.querySelector('#tbl tbody');
+    const solverSol = document.getElementById('solver_sol');
+    const bksSol = document.getElementById('bks_sol');
+    let svgSolver = null;
+    let svgBks = null;
+    const chkShowNodes = document.getElementById('chk-show-nodes');
+    const chkHideStart = document.getElementById('chk-hide-start');
+    const chkHideEnd = document.getElementById('chk-hide-end');
+    const solverFilter = document.getElementById('solver-filter');
+    const bksFilter = document.getElementById('bks-filter');
+    const tblSolverBody = document.querySelector('#tbl-solver tbody');
+    const tblBksBody = document.querySelector('#tbl-bks tbody');
+    let selectedIdx = 0;
+    let selectedRouteSolver = null; // {layer:'solver', idx}
+    let selectedRouteBks = null;    // {layer:'bks', idx}
+    let visibleRoutesSolver = new Set(); // indices
+    let visibleRoutesBks = new Set();    // indices
+
+    function loadData() {
+      const sel = document.getElementById('datafile').value;
+      const txt = document.getElementById('datafile_text').value;
+      const file = txt || sel || getParam('data');
+      if (!file) { alert('Specify ?data=... or choose a file'); return; }
+      svgSolver = d3.select('#svg-solver');
+      svgBks = d3.select('#svg-bks');
+      fetch(file)
+        .then(r => r.json())
+        .then(json => {
+          data = json;
+          instances = json.instances || [];
+          renderTable();
+        }).catch(err => alert(err));
+      // Hook up toggle events to redraw current selection
+      [chkShowNodes, chkHideStart, chkHideEnd].forEach(el => {
+        el.onchange = () => {
+          if (instances.length) {
+            showDetails(selectedIdx);
+          }
+        };
+      });
+    }
+
+    function renderTable() {
+      tbody.innerHTML = '';
+      instances.forEach((inst, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${inst.instance}</td><td>${inst.solver_cost ?? ''}</td><td>${inst.bks_cost ?? ''}</td><td>${fmtGap(inst.gap_pct)}</td><td>${inst.valid}</td><td>${inst.time_ms?.toFixed?.(1) ?? ''}</td>`;
+        tr.onclick = () => showDetails(idx);
+        tbody.appendChild(tr);
+      });
+      if (instances.length > 0) showDetails(0);
+    }
+
+    function fmtGap(g) { return g === null || g === undefined ? '' : g.toFixed(2); }
+
+    function showDetails(idx) {
+      selectedIdx = idx;
+      selectedRouteSolver = null;
+      selectedRouteBks = null;
+      visibleRoutesSolver = new Set();
+      visibleRoutesBks = new Set();
+      const inst = instances[idx];
+      solverSol.textContent = inst.solver_sol || 'Solver solution';
+      bksSol.textContent = inst.bks_sol || 'BKS solution';
+      renderRouteTables(inst);
+      drawRoutes(inst);
+    }
+
+    function getParam(name) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(name);
+    }
+
+    // Auto-load if ?data=
+    window.onload = () => {
+      const p = getParam('data');
+      if (p) {
+        // If p matches one of the preset options, select it; otherwise put into text field
+        const sel = document.getElementById('datafile');
+        const opt = Array.from(sel.options).find(o => o.value === p);
+        if (opt) sel.value = p; else document.getElementById('datafile_text').value = p;
+        loadData();
+      }
+      solverFilter.oninput = () => { if (instances.length) renderRouteTables(instances[selectedIdx]); };
+      bksFilter.oninput = () => { if (instances.length) renderRouteTables(instances[selectedIdx]); };
+    };
+
+    function parseRoutes(solText) {
+      const routes = [];
+      solText.split(/\r?\n/).forEach(line => {
+        line = line.trim();
+        if (!line.toUpperCase().startsWith("ROUTE")) return;
+        const parts = line.split(":");
+        if (parts.length < 2) return;
+        const nodes = parts[1].trim().split(/\s+/).filter(Boolean).map(x => x.trim());
+        routes.push(nodes);
+      });
+      return routes;
+    }
+
+    function renderRouteTables(inst) {
+      const solverRoutes = parseRoutes(inst.solver_sol || "");
+      const bksRoutes = parseRoutes(inst.bks_sol || "");
+      const sf = (solverFilter.value || "").trim().toLowerCase();
+      const bf = (bksFilter.value || "").trim().toLowerCase();
+      tblSolverBody.innerHTML = '';
+      tblBksBody.innerHTML = '';
+      solverRoutes.forEach((rt, idx) => {
+        const txt = rt.join(' ');
+        if (sf && !txt.toLowerCase().includes(sf)) return;
+        const tr = document.createElement('tr');
+        const rem = computeRemain(inst, rt);
+        const checked = visibleRoutesSolver.size === 0 || visibleRoutesSolver.has(idx);
+        tr.innerHTML = `<td>${idx+1}</td><td><input type="checkbox" data-layer="solver" data-idx="${idx}" ${checked?'checked':''}></td><td>${txt}</td><td>${rem}</td>`;
+        tr.onclick = (e) => { selectedRouteSolver = {layer:'solver', idx}; drawRoutes(instances[selectedIdx]); };
+        tblSolverBody.appendChild(tr);
+      });
+      bksRoutes.forEach((rt, idx) => {
+        const txt = rt.join(' ');
+        if (bf && !txt.toLowerCase().includes(bf)) return;
+        const tr = document.createElement('tr');
+        const rem = computeRemain(inst, rt);
+        const checked = visibleRoutesBks.size === 0 || visibleRoutesBks.has(idx);
+        tr.innerHTML = `<td>${idx+1}</td><td><input type="checkbox" data-layer="bks" data-idx="${idx}" ${checked?'checked':''}></td><td>${txt}</td><td>${rem}</td>`;
+        tr.onclick = (e) => { selectedRouteBks = {layer:'bks', idx}; drawRoutes(instances[selectedIdx]); };
+        tblBksBody.appendChild(tr);
+      });
+      // attach checkbox handlers
+      tblSolverBody.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.onchange = () => {
+          const idx = parseInt(cb.dataset.idx, 10);
+          if (cb.checked) visibleRoutesSolver.add(idx); else visibleRoutesSolver.delete(idx);
+          drawRoutes(instances[selectedIdx]);
+        };
+      });
+      tblBksBody.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.onchange = () => {
+          const idx = parseInt(cb.dataset.idx, 10);
+          if (cb.checked) visibleRoutesBks.add(idx); else visibleRoutesBks.delete(idx);
+          drawRoutes(instances[selectedIdx]);
+        };
+      });
+    }
+
+    function computeRemain(inst, rt) {
+      const dem = inst.demands || {};
+      const Q = inst.capacity ?? inst.Q ?? null;
+      if (!Q) return '';
+      let load = 0;
+      rt.forEach(n => {
+        const d = dem[n] || dem[String(n)] || 0;
+        load += d;
+      });
+      return (Q - load);
+    }
+
+    function drawRoutes(inst) {
+      svgSolver.selectAll("*").remove();
+      svgBks.selectAll("*").remove();
+      if (!inst.coords || Object.keys(inst.coords).length === 0) return;
+      const coords = inst.coords;
+      const depot = inst.depot || "0";
+      const demands = inst.demands || {};
+      const allNodes = Object.entries(coords).map(([k,v]) => ({id:k, x:v[0], y:v[1], demand: demands[k] || demands[parseInt(k)] || 0}));
+      const width = svgSolver.node().clientWidth || 400;
+      const height = svgSolver.node().clientHeight || 420;
+      const pad = 20;
+      const xScale = d3.scaleLinear().domain(d3.extent(allNodes, d => d.x)).range([pad, width-pad]);
+      const yScale = d3.scaleLinear().domain(d3.extent(allNodes, d => d.y)).range([height-pad, pad]);
+
+      const opts = {
+        showNodes: chkShowNodes.checked,
+        hideStart: chkHideStart.checked,
+        hideEnd: chkHideEnd.checked,
+      };
+
+      const solverRoutes = parseRoutes(inst.solver_sol || "");
+      const bksRoutes = parseRoutes(inst.bks_sol || "");
+      // Apply visibility filters: if a layer has selected checkboxes, show only those routes; otherwise show all.
+      const visSolver = visibleRoutesSolver.size ? solverRoutes.filter((_, i) => visibleRoutesSolver.has(i)) : solverRoutes;
+      const visBks = visibleRoutesBks.size ? bksRoutes.filter((_, i) => visibleRoutesBks.has(i)) : bksRoutes;
+      drawLayer(svgSolver, visSolver, coords, depot, xScale, yScale, "#f15a5a", opts, 'solver');
+      drawLayer(svgBks, visBks, coords, depot, xScale, yScale, "#7f8fa4", opts, 'bks');
+
+      [svgSolver, svgBks].forEach(svgEl => {
+        // nodes inside the zoomable group
+        const g = svgEl.__nodesG || svgEl.append("g");
+        g.selectAll("circle")
+          .data(allNodes)
+          .enter()
+          .append("circle")
+          .attr("cx", d => xScale(d.x))
+          .attr("cy", d => yScale(d.y))
+          .attr("r", d => d.id === depot ? 6 : 4)
+          .attr("fill", d => d.id === depot ? "#4caf50" : "#eaeaea");
+        if (opts.showNodes) {
+          g.selectAll("text")
+            .data(allNodes)
+            .enter()
+            .append("text")
+            .attr("x", d => xScale(d.x) + 6)
+            .attr("y", d => yScale(d.y) - 6)
+            .attr("fill", "#9aa2ad")
+            .attr("font-size", "10px")
+            .text(d => d.id);
+        }
+      });
+    }
+
+    function drawLayer(svgEl, routes, coords, depot, xScale, yScale, color, opts, layerName) {
+      // Container group for zooming both edges and nodes
+      const root = svgEl.append("g");
+      const edgesG = root.append("g");
+      const nodesG = root.append("g");
+      const zoom = d3.zoom().scaleExtent([0.5, 8]).on("zoom", (event) => {
+        root.attr("transform", event.transform);
+      });
+      svgEl.call(zoom);
+      routes.forEach((rt, idx) => {
+        let seq = rt.slice();
+        if (!opts.hideStart) seq = [depot, ...seq];
+        if (!opts.hideEnd) seq = [...seq, depot];
+        const pts = seq.map(nid => coords[nid]).filter(Boolean).map(pt => [xScale(pt[0]), yScale(pt[1])]);
+        if (pts.length >= 2) {
+          const highlighted = (layerName === 'solver' && selectedRouteSolver && selectedRouteSolver.idx === idx) ||
+                              (layerName === 'bks' && selectedRouteBks && selectedRouteBks.idx === idx);
+          edgesG.append("path")
+            .attr("d", d3.line()(pts))
+            .attr("fill","none")
+            .attr("stroke", color)
+            .attr("stroke-width", highlighted ? 3 : 1.5)
+            .attr("stroke-opacity", highlighted ? 1.0 : 0.7);
+        }
+      });
+      // Nodes get drawn in caller to allow labels/colors, but attach to nodesG
+      svgEl.__nodesG = nodesG;
+    }
+  </script>
+</body>
+</html>
