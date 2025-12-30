@@ -1,6 +1,8 @@
 __pycache__/
 .pytest_cache/
 .venv/
+.DS_Store
+.mplcache/
 out/runs.db
 out/report/*.json
 *.sqlite
@@ -8,3 +10,12 @@ out/report/*.json
 *.log
 *.tmp
 *.pyc
+
+# Large instance dumps (avoid slowing git/Codex)
+cvrp_data_instances/
+
+# Public repo: treat bundled instances as local fixtures
+data/instances/
+
+# Solver outputs / artifacts
+out/

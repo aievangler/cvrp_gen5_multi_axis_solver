@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gen5_v5 Runs</title>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #161a1f;
+        --text: #eaeaea;
+        --muted: #9aa2ad;
+        --border: #242a31;
+        --accent: #4caf50;
+        --bad: #f15a5a;
+      }
+      body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+      h2 { margin: 0 0 12px 0; }
+      .bar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+      input { background: #0f1318; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+      button { background: #0f1318; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid var(--border); padding: 8px; font-size: 13px; text-align: left; vertical-align: top; }
+      th { color: var(--muted); background: var(--panel); position: sticky; top: 0; }
+      tr:hover { background: #11151b; }
+      a { color: var(--accent); text-decoration: none; }
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+      .pill.bad { color: var(--bad); border-color: #3a1c1c; background: #1a0f10; }
+      .muted { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <h2>Gen5_v5 Runs</h2>
+    <div class="bar">
+      <input id="filter" placeholder="filter (instance / notes / run_id)" style="flex:1;" />
+      <button id="refresh">Refresh</button>
+    </div>
+    <div class="muted" id="status"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>Run</th>
+          <th>Instance</th>
+          <th>Cost</th>
+          <th>BKS</th>
+          <th>Gap</th>
+          <th>Edge %</th>
+          <th>Runtime</th>
+          <th>Params</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <script>
+      const rowsEl = document.getElementById('rows');
+      const statusEl = document.getElementById('status');
+      const filterEl = document.getElementById('filter');
+      const refreshBtn = document.getElementById('refresh');
+      let allRuns = [];
+
+      function fmt(x, nd=2) {
+        if (x === null || x === undefined) return '-';
+        if (typeof x === 'number') return x.toFixed(nd);
+        return String(x);
+      }
+
+      function ms(x) { return x === null || x === undefined ? '-' : `${fmt(x, 1)}s`; }
+
+      function render(items) {
+        const q = (filterEl.value || '').toLowerCase().trim();
+        const filtered = !q ? items : items.filter(r => {
+          const hay = `${r.run_id} ${r.instance||''} ${r.config_summary||''} ${r.notes||''}`.toLowerCase();
+          return hay.includes(q);
+        });
+        rowsEl.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        filtered.forEach(r => {
+          const tr = document.createElement('tr');
+          const valid = r.valid === null || r.valid === undefined ? null : Number(r.valid) === 1;
+          const gap = r.gap_pct;
+          const edge = r.edge_pct;
+          tr.innerHTML = `
+            <td><a href="/gen5v5/run?run_id=${encodeURIComponent(r.run_id)}">${r.run_id}</a> ${valid === false ? '<span class="pill bad">invalid</span>' : ''}</td>
+            <td class="muted">${r.instance || '-'}</td>
+            <td>${r.solver_cost ?? '-'}</td>
+            <td>${r.bks_cost ?? '-'}</td>
+            <td>${gap === null || gap === undefined ? '-' : fmt(gap, 2) + '%'}</td>
+            <td>${edge === null || edge === undefined ? '-' : fmt(edge, 1) + '%'}</td>
+            <td>${ms(r.runtime_s)}</td>
+            <td class="muted" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${(r.config_summary || '')}">${(r.config_summary || '')}</td>
+            <td class="muted" style="max-width:560px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${(r.notes || '')}">${(r.notes || '')}</td>
+          `;
+          frag.appendChild(tr);
+        });
+        rowsEl.appendChild(frag);
+        statusEl.textContent = `Showing ${filtered.length} / ${items.length}`;
+      }
+
+      async function load() {
+        statusEl.textContent = 'Loading...';
+        const res = await fetch('/api/gen5v5/runs');
+        if (!res.ok) throw new Error(await res.text());
+        allRuns = await res.json();
+        render(allRuns);
+      }
+
+      refreshBtn.onclick = () => load().catch(err => statusEl.textContent = 'ERROR: ' + err.message);
+      filterEl.oninput = () => render(allRuns);
+      load().catch(err => statusEl.textContent = 'ERROR: ' + err.message);
+    </script>
+  </body>
+</html>
