@@ -1,0 +1,562 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [ 5 0 R 7 0 R 9 0 R 11 0 R ] /Count 4 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+4 0 obj
+<< /Length 3072 >>
+stream
+BT
+/F1 9 Tf
+40 743 Td
+11 TL
+(GEN5_V5 \(CVRP3\) HANDOFF NOTE) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(This document is a ?pick up from here? snapshot for the Gen5_v5 solver + runner + viewer that we) Tj
+T*
+(iterated on in this thread.) Tj
+T*
+() Tj
+T*
+(1\) WHAT TO RUN \(MAIN ENTRYPOINTS\)) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(CORE SOLVER PIPELINE) Tj
+T*
+() Tj
+T*
+(- `gen5_multi_axis_solver_schedule_validated.py` ? the *runner/scheduler* \(CLI you invoke\).) Tj
+T*
+(Loads a `.vrp`, optionally a BKS `.sol`, runs staged solve blocks, logs to SQLite, and writes) Tj
+T*
+(the final `.sol` output.) Tj
+T*
+(- `gen5_multi_axis_solver_validated.py` ? the *solver module* \(loaded via `--solver-path`\).) Tj
+T*
+(Contains STN building, multi-axis neighbor logic, relocate/2-opt kernels, and EPN top-up) Tj
+T*
+(implementation.) Tj
+T*
+() Tj
+T*
+(SOLVER STRATEGIES / FEATURES) Tj
+T*
+() Tj
+T*
+(- `gen5_multi_axis_solver_schedule_validated.py` ? stage loop + axis schedule + plateau hooks +) Tj
+T*
+(strict-feasible snapshot tracking.) Tj
+T*
+(- `gen5_multi_axis_solver_validated.py` ? EPN \(edge proximity neighbors\), geo KNN1, STN ranking) Tj
+T*
+(knobs, and the local search primitives.) Tj
+T*
+() Tj
+T*
+(VIEWER) Tj
+T*
+() Tj
+T*
+(- `viewer/backend.py` ? FastAPI server that reads `runs.sqlite` and serves:) Tj
+T*
+(- run list page) Tj
+T*
+(- run detail page with stage table + plots + route selectors) Tj
+T*
+(- `viewer/gen5_v5_runs.html` ? run list UI \(filters, pick run_id\).) Tj
+T*
+(- `viewer/gen5_v5_run.html` ? run detail UI \(stage progress table, solver/BKS plots, route) Tj
+T*
+(toggles, delta view\).) Tj
+T*
+() Tj
+T*
+(2\) LOGGING \(ENABLED BY DEFAULT\)) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(- Default DB: `runs.sqlite` \(override with `--db`\).) Tj
+T*
+(- Every solver invocation gets a `run_id` in SQLite.) Tj
+T*
+(- CLI supports `--notes` to tag a run \(stored in DB; shown in viewer\).) Tj
+T*
+(- Output `.sol` is auto-prefixed with the run id: `out/runid_<run_id>_<your_out_sol_name>.sol`) Tj
+T*
+() Tj
+T*
+(DB tables used by Gen5_v5:) Tj
+T*
+(- `gen5_v5_runs` ? one row per run \(instance, args, notes, timestamps\).) Tj
+T*
+(- `gen5_v5_snapshots` ? stored plans/costs per stage boundary \(start/end\).) Tj
+T*
+(- `gen5_v5_results` ? final summary row for the run \(best strict cost, wall time, etc\).) Tj
+T*
+() Tj
+T*
+(3\) STAGES AND ?BEST? TRACKING \(IMPORTANT\)) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(The runner tracks two notions of ?best?:) Tj
+T*
+(- `best_strict`: best solution feasible under original capacity `Q_orig` \(this is what the run) Tj
+T*
+(will output\).) Tj
+T*
+(- `best_any`: best solution under the *current stage?s effective capacity* \(e.g., soft stage) Tj
+T*
+(`Q_eff = soft_factor * Q_orig`\). This may violate `Q_orig`.) Tj
+T*
+() Tj
+T*
+(Console progress lines:) Tj
+T*
+(- `best=...` is the **best strict-feasible cost so far**.) Tj
+T*
+(- `best_any=...` may appear during soft stages when a softer-capacity solution beats) Tj
+T*
+(`best_strict`.) Tj
+T*
+() Tj
+T*
+(Final output `.sol`:) Tj
+T*
+(- Always written from `best_strict` \(prevents ?time limit ends mid-block ? output regresses?) Tj
+T*
+0 -11 Td
+(Page 1/4) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 3011 >>
+stream
+BT
+/F1 9 Tf
+40 743 Td
+11 TL
+(bugs\).) Tj
+T*
+() Tj
+T*
+(4\) MAJOR CLI PARAMETERS \(RUNNER\)) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(REQUIRED / COMMON) Tj
+T*
+() Tj
+T*
+(- positional `vrp`: instance path.) Tj
+T*
+(- `--out-sol out/<name>.sol`: output path \(will be prefixed with `runid_XX_`\).) Tj
+T*
+(- `--solver-path gen5_multi_axis_solver_validated.py`) Tj
+T*
+(- `--db runs.sqlite`) Tj
+T*
+(- `--notes "..."` \(recommended\)) Tj
+T*
+() Tj
+T*
+(BUDGETS / PROGRESS) Tj
+T*
+() Tj
+T*
+(- `--time-limit-s <seconds>`: wall-clock cap \(0 = no limit\).) Tj
+T*
+(- `--progress-every-s <seconds>`: progress print cadence.) Tj
+T*
+() Tj
+T*
+(LOOKAHEAD \(BEAM WIDTH\)) Tj
+T*
+() Tj
+T*
+(- `--strict-lookahead <int>`: strict/tight stages \(default 1\).) Tj
+T*
+(- `--soft-lookahead <int>`: soft stage \(default 5\).) Tj
+T*
+() Tj
+T*
+(AXIS / PHI SCHEDULE) Tj
+T*
+() Tj
+T*
+(- `--phis "45,-45,90,0,135,-135"`: candidate-axis angles in degrees.) Tj
+T*
+(- `--axis-count-schedule "1,2,3,4,5,6,5,4,3,2,1"`: active axis count per block \(prefix of) Tj
+T*
+(`--phis`\).) Tj
+T*
+(- `--axis-block-iters <int>`: iterations per axis-count block.) Tj
+T*
+(- `--axis-block-time-s <float>`: seconds per block \(0 disables; uses iters\).) Tj
+T*
+(- `--axis-schedule-mode cycle|prune`: how to rotate phis inside a block.) Tj
+T*
+(- `--axis-block-seed-step <int>`: deterministic seed increment per block.) Tj
+T*
+() Tj
+T*
+(STAGE SCHEDULE \(TIGHT/SOFT/STRICT\)) Tj
+T*
+() Tj
+T*
+(- `--tight-factor <float>`: capacity multiplier for tight stage \(default 0.7\).) Tj
+T*
+(- `--soft-factor <float>`: capacity multiplier for soft stage \(default 1.8\).) Tj
+T*
+(- `--tight-iters`, `--soft-iters`, `--strict-iters`: block iteration budgets.) Tj
+T*
+(- `--use-schedule`: enable tight?soft?strict loop schedule.) Tj
+T*
+() Tj
+T*
+(EPN \(ENABLED BY DEFAULT IN SOFT\)) Tj
+T*
+() Tj
+T*
+(- `--no-epn-soft`: disable EPN top-up in soft stage.) Tj
+T*
+(- `--epn-k1`: KNN1 size for exclusion.) Tj
+T*
+(- `--epn-k`: max nodes returned per edge query.) Tj
+T*
+(- `--epn-max-tested`: cap tested nodes per edge query.) Tj
+T*
+(- `--epn-long-edges-per-route`: trigger edges per route \(long edges\).) Tj
+T*
+(- `--epn-max-moves`: applied EPN moves per LNS step.) Tj
+T*
+(- `--epn-d2-beta`: edge-near cutoff: `d2\(w, segment\) <= beta * edge_len2`.) Tj
+T*
+() Tj
+T*
+(FULL PER-ROUTE 2-OPT ?UNCROSSING? CLEANUP) Tj
+T*
+() Tj
+T*
+(- `--full-2opt-on-best`: run a full per-route 2-opt local search when a new global best is) Tj
+T*
+(found.) Tj
+T*
+(- `--full-2opt-stage strict|all`: apply only when stage is strict, or in all stages.) Tj
+T*
+(- `--full-2opt-max-len <int>`: apply only to routes with length ? this \(0 = no cap\).) Tj
+T*
+(- `--full-2opt-max-passes <int>`: passes per route.) Tj
+T*
+() Tj
+T*
+(STN ?FAR NODE? KNOBS \(EUC_2D ONLY\)) Tj
+T*
+() Tj
+T*
+(These are only active for coordinate-based EUC_2D instances; for EXPLICIT instances the runner) Tj
+T*
+(will warn and ignore them.) Tj
+T*
+(- `--stn-r2-penalty-frac`: STN ranking penalty for mismatched depot-radius \(`r2`\) \(pushes) Tj
+T*
+0 -11 Td
+(Page 2/4) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 2792 >>
+stream
+BT
+/F1 9 Tf
+40 743 Td
+11 TL
+(?similar radial band? neighbors\).) Tj
+T*
+(- `--stn-far-y-mult`, `--stn-far-r-mult`: increase y/r pool sizes for far nodes to widen) Tj
+T*
+(candidate neighborhoods.) Tj
+T*
+(- `--stn-profile-schedule "far,lateral"` + `--stn-profile-blocks`: cycle different STN profiles) Tj
+T*
+(across axis blocks.) Tj
+T*
+(- `--stn-lateral-*`: profile-specific knobs for ?lateral? variant.) Tj
+T*
+() Tj
+T*
+(OTHER KNOBS YOU MAY SEE IN OLD COMMANDS) Tj
+T*
+() Tj
+T*
+(- `--k-remove`: remove-list size used by a destroy-like LNS step; optional and can be omitted) Tj
+T*
+(for baseline strict runs.) Tj
+T*
+(- `--ffs-on-plateau` + related `--ffs-*`: farthest-first seeding plateau breaker \(optional; can) Tj
+T*
+(degrade if overused\).) Tj
+T*
+() Tj
+T*
+(5\) COMMANDS YOU CAN REUSE \(EXAMPLES\)) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(A-N32-K5 \(SINGLE PHI STRICT-ONLY BASELINE\)) Tj
+T*
+() Tj
+T*
+(```bash) Tj
+T*
+(python3 gen5_multi_axis_solver_schedule_validated.py \\) Tj
+T*
+(/Users/bharatmudholkar/projects/codex_projects/cvrp3/cvrp_data_instances/A/A-n32-k5.vrp \\) Tj
+T*
+(--bks /Users/bharatmudholkar/projects/codex_projects/cvrp3/cvrp_data_instances/A/A-n32-k5.sol \\) Tj
+T*
+(--out-sol out/A-n32-k5.phi45.strict.sol \\) Tj
+T*
+(--solver-path gen5_multi_axis_solver_validated.py \\) Tj
+T*
+(--phis "45" \\) Tj
+T*
+(--time-limit-s 300 \\) Tj
+T*
+(--strict-iters 100000000 \\) Tj
+T*
+(--steps-reloc 200 --steps-2opt 160 \\) Tj
+T*
+(--strict-lookahead 3 \\) Tj
+T*
+(--progress-every-s 5 \\) Tj
+T*
+(--db runs.sqlite \\) Tj
+T*
+(--notes "A-n32-k5 phi=45 strict-only lookahead=3 t=300s") Tj
+T*
+(```) Tj
+T*
+() Tj
+T*
+(LOGGI-N1001-K31 \(MULTI-PHI + AXIS-COUNT SCHEDULE, BASELINE STRICT\)) Tj
+T*
+() Tj
+T*
+(```bash) Tj
+T*
+(python3 gen5_multi_axis_solver_schedule_validated.py \\) Tj
+T*
+(/Users/bharatmudholkar/projects/codex_projects/cvrp3/cvrp_data_instances/DIMACS/Loggi-n1001-k31.vrp) Tj
+T*
+(  \\) Tj
+T*
+(--bks) Tj
+T*
+(  /Users/bharatmudholkar/projects/codex_projects/cvrp3/cvrp_data_instances/DIMACS/Loggi-n1001-k31.sol) Tj
+T*
+(  \\) Tj
+T*
+(--out-sol out/Loggi-n1001-k31.axes_1to6to1.strict.sol \\) Tj
+T*
+(--solver-path gen5_multi_axis_solver_validated.py \\) Tj
+T*
+(--phis "45,-45,90,0,135,-135" \\) Tj
+T*
+(--axis-count-schedule "1,2,3,4,5,6,5,4,3,2,1" \\) Tj
+T*
+(--axis-block-iters 20 \\) Tj
+T*
+(--axis-schedule-mode cycle \\) Tj
+T*
+(--axis-block-seed-step 1000 \\) Tj
+T*
+(--time-limit-s 300 \\) Tj
+T*
+(--strict-iters 100000000 \\) Tj
+T*
+(--steps-reloc 60 --steps-2opt 40 \\) Tj
+T*
+(--strict-lookahead 3 \\) Tj
+T*
+(--progress-every-s 5 \\) Tj
+T*
+(--db runs.sqlite \\) Tj
+T*
+(--notes "Loggi-n1001-k31 strict + axis schedule 1-6-1; t=300s") Tj
+T*
+(```) Tj
+T*
+() Tj
+T*
+(If NumPy is missing in your venv, install it before running:) Tj
+T*
+(```bash) Tj
+T*
+(python3 -m pip install numpy) Tj
+T*
+0 -11 Td
+(Page 3/4) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 2253 >>
+stream
+BT
+/F1 9 Tf
+40 743 Td
+11 TL
+(```) Tj
+T*
+() Tj
+T*
+(6\) VIEWER USAGE \(DO NOT REBUILD A NEW VIEWER\)) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Start the backend:) Tj
+T*
+(```bash) Tj
+T*
+(python3 viewer/backend.py) Tj
+T*
+(```) Tj
+T*
+() Tj
+T*
+(Open in browser:) Tj
+T*
+(- Run list: `http://localhost:8000/gen5v5`) Tj
+T*
+(- Run detail: click a run, or `http://localhost:8000/gen5v5/run?run_id=<id>`) Tj
+T*
+() Tj
+T*
+(Detail page layout:) Tj
+T*
+(1\) Stage progress table \(per snapshot\): includes cost, gap vs BKS \(if provided\), edge-match) Tj
+T*
+(metrics \(if available\), and effective `Q`.) Tj
+T*
+(2\) Two plots: Solver vs BKS \(only these two; designed to handle large N by drawing a polyline) Tj
+T*
+(per route\).) Tj
+T*
+(3\) Route list with:) Tj
+T*
+(- select/deselect all) Tj
+T*
+(- per-route toggles) Tj
+T*
+(- delta mode \(show only changed routes vs previous snapshot\)) Tj
+T*
+(- ?show violated only? + highlight overshoot amount when `load > Q`.) Tj
+T*
+() Tj
+T*
+(7\) KNOWN GOTCHAS \(AS OF THIS HANDOFF\)) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(- **STN profile scheduling is EUC_2D-only**: if the instance is EXPLICIT, the runner warns and) Tj
+T*
+(ignores `--stn-profile-schedule` and far/lateral knobs.) Tj
+T*
+(- **Gap in final summary vs progress**: progress prints `best_strict`; the final `.sol` should) Tj
+T*
+(be written from `best_strict`. If you still see a mismatch, check that the final output path is) Tj
+T*
+(the `runid_XX_...` file \(not an older file\), and confirm the run is using the latest runner.) Tj
+T*
+(- **BKS mismatches**: if `--bks` has node IDs not present in the instance \(e.g., wrong file\),) Tj
+T*
+(BKS comparison will be disabled with a warning rather than crashing.) Tj
+T*
+() Tj
+T*
+(8\) WHERE TO CONTINUE NEXT TIME) Tj
+T*
+() Tj
+T*
+() Tj
+T*
+(Recommended next investigation items:) Tj
+T*
+(- Make the ?phi switching? more productive \(ensure each phi gets enough local optimization) Tj
+T*
+(before switching\).) Tj
+T*
+(- If Loggi instances are EXPLICIT, extend candidate/STN profile alternation logic to EXPLICIT) Tj
+T*
+(mode \(or provide a coordinate proxy\).) Tj
+T*
+(- Add a route-level stronger uncrossing/cleanup stage if crossings remain after full 2-opt) Tj
+T*
+(\(typically crossings left are across routes\).) Tj
+T*
+() Tj
+T*
+0 -11 Td
+(Page 4/4) Tj
+ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 10 0 R >>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000142 00000 n 
+0000000210 00000 n 
+0000003333 00000 n 
+0000003459 00000 n 
+0000006521 00000 n 
+0000006647 00000 n 
+0000009490 00000 n 
+0000009616 00000 n 
+0000011921 00000 n 
+trailer
+<< /Size 12 /Root 1 0 R >>
+startxref
+12049
+%%EOF

@@ -1,0 +1,420 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gen5_v5 Run</title>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #161a1f;
+        --text: #eaeaea;
+        --muted: #9aa2ad;
+        --border: #242a31;
+        --accent: #4caf50;
+        --solver: #f15a5a;
+        --bks: #7f8fa4;
+        --warn: #f0b429;
+      }
+      body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+      a { color: var(--accent); text-decoration: none; }
+      .wrap { display: grid; grid-template-columns: 520px 1fr; gap: 12px; padding: 12px; }
+      .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+      h3 { margin: 6px 0 10px 0; }
+      .meta { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .row { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; }
+      button, input[type="checkbox"] { cursor: pointer; }
+      button, select, input[type="number"] {
+        background: #0f1318; color: var(--text);
+        border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+      }
+      label { color: var(--muted); font-size: 13px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid var(--border); padding: 6px; font-size: 12px; text-align: left; }
+      th { color: var(--muted); position: sticky; top: 0; background: var(--panel); }
+      tr:hover { background: #11151b; }
+      tr.selected { outline: 2px solid #2a6; outline-offset: -2px; }
+      .scroll { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+      .plots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      canvas { width: 100%; height: 520px; background: #0f1318; border: 1px solid var(--border); border-radius: 10px; }
+      .routes { max-height: 360px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: #0f1318; }
+      .routeRow { display:flex; align-items:center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid #141a22; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
+      .routeRow:hover { background: #121822; }
+      .routeRow.active { background: #141d2a; color: var(--text); }
+      .routeRow.off { opacity: 0.45; }
+      .routeRow.bad { border-left: 4px solid #f15a5a; padding-left: 4px; color: #f0b0b0; }
+      .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+      .pill.warn { color: var(--warn); border-color: #3a2f11; background: #1a140b; }
+    </style>
+  </head>
+  <body>
+    <div style="padding:12px;">
+      <a href="/gen5v5">← runs</a>
+      <span id="title" style="margin-left:10px;"></span>
+    </div>
+
+    <div class="wrap">
+      <div class="panel">
+        <h3>Progress</h3>
+        <div class="meta" id="meta"></div>
+        <div class="row" style="margin:8px 0;">
+          <label><input type="checkbox" id="deltaMode"> Delta from previous snapshot</label>
+          <label><input type="checkbox" id="drawNodes"> Draw nodes (slow at 20k)</label>
+          <label><input type="checkbox" id="drawDepot" checked> Draw depot</label>
+          <label><input type="checkbox" id="violOnly"> Show violated routes only</label>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>t(s)</th>
+                <th>stage</th>
+                <th>Q</th>
+                <th>k</th>
+                <th>phi</th>
+                <th>cost</th>
+                <th>bks</th>
+                <th>gap</th>
+                <th>edge%</th>
+                <th>routes</th>
+                <th>ok</th>
+                <th>reason</th>
+              </tr>
+            </thead>
+            <tbody id="snapRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="plots">
+          <div>
+            <h3>Solver</h3>
+            <canvas id="solverCanvas" width="900" height="520"></canvas>
+          </div>
+          <div>
+            <h3>BKS</h3>
+            <canvas id="bksCanvas" width="900" height="520"></canvas>
+          </div>
+        </div>
+
+        <h3 style="margin-top:10px;">Routes</h3>
+        <div class="row" style="margin-bottom:8px;">
+          <button id="selAll">All</button>
+          <button id="selNone">None</button>
+          <span class="pill" id="routeStats"></span>
+          <span class="pill warn" id="deltaInfo" style="display:none;"></span>
+        </div>
+        <div class="routes" id="routeList"></div>
+      </div>
+    </div>
+
+    <script>
+      const qs = new URLSearchParams(location.search);
+      const runId = Number(qs.get('run_id') || '');
+      const titleEl = document.getElementById('title');
+      const metaEl = document.getElementById('meta');
+      const snapRowsEl = document.getElementById('snapRows');
+      const deltaModeEl = document.getElementById('deltaMode');
+      const drawNodesEl = document.getElementById('drawNodes');
+      const drawDepotEl = document.getElementById('drawDepot');
+      const violOnlyEl = document.getElementById('violOnly');
+      const solverCanvas = document.getElementById('solverCanvas');
+      const bksCanvas = document.getElementById('bksCanvas');
+      const routeListEl = document.getElementById('routeList');
+      const routeStatsEl = document.getElementById('routeStats');
+      const deltaInfoEl = document.getElementById('deltaInfo');
+      const selAllBtn = document.getElementById('selAll');
+      const selNoneBtn = document.getElementById('selNone');
+
+      let inst = null;        // {x[], y[], demand[], depot, ... , bks:{routes[]}}
+      let snapshots = [];     // metadata rows
+      let selectedSnapIdx = -1;
+      let solverSnap = null;  // payload for selected snapshot
+      let visible = [];       // bool per route in solverSnap.routes
+      let activeRouteIdx = null;
+
+      let sx = null, sy = null;
+
+      function fmt(x, nd=2) {
+        if (x === null || x === undefined) return '-';
+        if (typeof x === 'number') return x.toFixed(nd);
+        return String(x);
+      }
+
+      function scaleInstance() {
+        const n = inst.dimension;
+        let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+        for (let i=0;i<=n;i++) {
+          const x = inst.x[i], y = inst.y[i];
+          if (x < xmin) xmin = x;
+          if (x > xmax) xmax = x;
+          if (y < ymin) ymin = y;
+          if (y > ymax) ymax = y;
+        }
+        const pad = 18;
+        const w = solverCanvas.width, h = solverCanvas.height;
+        const dx = Math.max(1e-9, xmax - xmin);
+        const dy = Math.max(1e-9, ymax - ymin);
+        const sxScale = (w - 2*pad) / dx;
+        const syScale = (h - 2*pad) / dy;
+        const s = Math.min(sxScale, syScale);
+        sx = new Float32Array(n + 1);
+        sy = new Float32Array(n + 1);
+        for (let i=0;i<=n;i++) {
+          sx[i] = pad + (inst.x[i] - xmin) * s;
+          sy[i] = h - (pad + (inst.y[i] - ymin) * s);
+        }
+      }
+
+      function resizeCanvases() {
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        [solverCanvas, bksCanvas].forEach(c => {
+          const rect = c.getBoundingClientRect();
+          const w = Math.max(200, Math.floor(rect.width * dpr));
+          const h = Math.max(200, Math.floor(rect.height * dpr));
+          if (c.width !== w) c.width = w;
+          if (c.height !== h) c.height = h;
+        });
+        if (inst) scaleInstance();
+        renderPlots();
+      }
+
+      function clearCanvas(c) {
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0, 0, c.width, c.height);
+        ctx.fillStyle = '#0f1318';
+        ctx.fillRect(0, 0, c.width, c.height);
+        return ctx;
+      }
+
+      function drawNodes(ctx) {
+        if (!drawNodesEl.checked) return;
+        const n = inst.dimension;
+        const step = n > 20000 ? 10 : (n > 5000 ? 5 : 1);
+        ctx.fillStyle = 'rgba(160,160,160,0.7)';
+        for (let i=1;i<=n;i+=step) {
+          ctx.beginPath();
+          ctx.arc(sx[i], sy[i], 1.2, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+
+      function drawDepot(ctx, color) {
+        if (!drawDepotEl.checked) return;
+        const d = inst.depot;
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#2e7d32';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx[d], sy[d], 6, 0, Math.PI*2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      function drawRoutes(ctx, routes, color, visibleMask, highlightIdx) {
+        const depot = inst.depot;
+        ctx.lineWidth = 1.0;
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.6;
+
+        // Batch draw visible routes (fast).
+        ctx.beginPath();
+        for (let r=0;r<routes.length;r++) {
+          if (visibleMask && !visibleMask[r]) continue;
+          const nodes = routes[r].nodes;
+          ctx.moveTo(sx[depot], sy[depot]);
+          for (let i=0;i<nodes.length;i++) {
+            const n = nodes[i];
+            ctx.lineTo(sx[n], sy[n]);
+          }
+          ctx.lineTo(sx[depot], sy[depot]);
+        }
+        ctx.stroke();
+
+        // Highlight one route on top.
+        if (highlightIdx !== null && highlightIdx !== undefined && highlightIdx >= 0 && highlightIdx < routes.length) {
+          if (!visibleMask || visibleMask[highlightIdx]) {
+            const nodes = routes[highlightIdx].nodes;
+            ctx.globalAlpha = 0.95;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(sx[depot], sy[depot]);
+            for (let i=0;i<nodes.length;i++) ctx.lineTo(sx[nodes[i]], sy[nodes[i]]);
+            ctx.lineTo(sx[depot], sy[depot]);
+            ctx.stroke();
+          }
+        }
+        ctx.globalAlpha = 1.0;
+      }
+
+      function renderPlots() {
+        if (!inst || !sx) return;
+        const solverCtx = clearCanvas(solverCanvas);
+        const bksCtx = clearCanvas(bksCanvas);
+
+        if (inst.bks && inst.bks.routes) {
+          drawRoutes(bksCtx, inst.bks.routes, getComputedStyle(document.documentElement).getPropertyValue('--bks').trim(), null, null);
+        }
+        drawNodes(bksCtx);
+        drawDepot(bksCtx, '#4caf50');
+
+        if (solverSnap && solverSnap.routes) {
+          drawRoutes(solverCtx, solverSnap.routes, getComputedStyle(document.documentElement).getPropertyValue('--solver').trim(), visible, activeRouteIdx);
+        }
+        drawNodes(solverCtx);
+        drawDepot(solverCtx, '#4caf50');
+      }
+
+      function buildRouteList() {
+        routeListEl.innerHTML = '';
+        if (!solverSnap || !solverSnap.routes) return;
+        const routes = solverSnap.routes;
+        const qOrig = solverSnap.q_orig ?? inst.capacity ?? null;
+        const violatedMask = routes.map(r => (Number(r.over_by || 0) > 0) || (qOrig !== null && Number(r.load || 0) > Number(qOrig)));
+        visible = routes.map((_, i) => violOnlyEl.checked ? violatedMask[i] : true);
+        activeRouteIdx = null;
+
+        const frag = document.createDocumentFragment();
+        for (let i=0;i<routes.length;i++) {
+          const r = routes[i];
+          if (violOnlyEl.checked && !violatedMask[i]) continue;
+          const div = document.createElement('div');
+          div.className = 'routeRow';
+          const over = Number(r.over_by || 0);
+          if (over > 0) div.classList.add('bad');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = !!visible[i];
+          cb.onchange = () => { visible[i] = cb.checked; div.classList.toggle('off', !cb.checked); renderPlots(); };
+          const label = document.createElement('span');
+          const overTxt = over > 0 ? `  OVER=+${over}` : '';
+          const qTxt = qOrig !== null ? `  Q=${qOrig}` : '';
+          label.textContent = `R#${i+1}  load=${r.load}${qTxt}${overTxt}  cost=${r.cost}  len=${r.nodes.length}`;
+          div.onclick = (e) => {
+            if (e.target && e.target.tagName === 'INPUT') return;
+            activeRouteIdx = i;
+            [...routeListEl.children].forEach(x => x.classList.remove('active'));
+            div.classList.add('active');
+            renderPlots();
+          };
+          div.appendChild(cb);
+          div.appendChild(label);
+          frag.appendChild(div);
+        }
+        routeListEl.appendChild(frag);
+        const violCount = violatedMask.filter(x => x).length;
+        const extra = (qOrig !== null) ? ` | Q=${qOrig} | viol=${violCount}` : ` | viol=${violCount}`;
+        routeStatsEl.textContent = `routes: ${routes.length} | solver_cost: ${solverSnap.solver_cost ?? '-'}${extra}`;
+        if (deltaModeEl.checked) {
+          deltaInfoEl.style.display = '';
+          if (solverSnap.delta_vs_snapshot_id) {
+            deltaInfoEl.textContent = `delta vs snapshot ${solverSnap.delta_vs_snapshot_id} (routes shown: ${routes.length})`;
+          } else {
+            deltaInfoEl.textContent = `delta (first snapshot) (routes shown: ${routes.length})`;
+          }
+        } else {
+          deltaInfoEl.style.display = 'none';
+        }
+        renderPlots();
+      }
+
+      function selectSnapshot(idx) {
+        selectedSnapIdx = idx;
+        [...snapRowsEl.children].forEach(x => x.classList.remove('selected'));
+        const tr = snapRowsEl.children[idx];
+        if (tr) tr.classList.add('selected');
+        const snap = snapshots[idx];
+        const useDelta = deltaModeEl.checked ? 1 : 0;
+        fetch(`/api/gen5v5/snapshot/${snap.snapshot_id}?delta=${useDelta}`)
+          .then(r => r.json())
+          .then(data => { solverSnap = data; buildRouteList(); })
+          .catch(err => { metaEl.textContent = 'ERROR loading snapshot: ' + err.message; });
+      }
+
+      function renderProgressTable() {
+        snapRowsEl.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        snapshots.forEach((s, idx) => {
+          const tr = document.createElement('tr');
+          const gap = s.gap_pct;
+          const edge = s.edge_pct;
+          const ok = (Number(s.valid_coverage) === 1) && (Number(s.valid_strict) === 1);
+          const Qorig = inst && inst.capacity ? Number(inst.capacity) : null;
+          const args = window._runArgs || null;
+          let Qeff = Qorig;
+          if (Qorig !== null && args) {
+            const stage = String(s.stage || '');
+            if (stage === 'soft' && args.soft_factor) Qeff = Math.max(1, Math.floor(Qorig * Number(args.soft_factor)));
+            else if (stage === 'tight' && args.tight_factor) Qeff = Math.max(1, Math.floor(Qorig * Number(args.tight_factor)));
+            else Qeff = Qorig;
+          }
+          tr.innerHTML = `
+            <td>${s.snapshot_id}</td>
+            <td>${fmt(s.elapsed_s, 1)}</td>
+            <td>${s.stage}</td>
+            <td>${Qeff === null ? '-' : Qeff}</td>
+            <td>${s.axes_k}</td>
+            <td>${s.phi_hint === null || s.phi_hint === undefined ? '-' : fmt(s.phi_hint, 0)}</td>
+            <td>${s.solver_cost ?? '-'}</td>
+            <td>${s.bks_cost ?? '-'}</td>
+            <td>${gap === null || gap === undefined ? '-' : fmt(gap, 2) + '%'}</td>
+            <td>${edge === null || edge === undefined ? '-' : fmt(edge, 1) + '%'}</td>
+            <td>${s.route_count ?? '-'}</td>
+            <td>${ok ? 'ok' : 'bad'}</td>
+            <td>${s.reason}</td>
+          `;
+          tr.onclick = () => selectSnapshot(idx);
+          frag.appendChild(tr);
+        });
+        snapRowsEl.appendChild(frag);
+        if (snapshots.length > 0) selectSnapshot(snapshots.length - 1);
+      }
+
+      selAllBtn.onclick = () => {
+        if (!solverSnap || !solverSnap.routes) return;
+        visible = solverSnap.routes.map(() => true);
+        [...routeListEl.querySelectorAll('input[type=checkbox]')].forEach(cb => cb.checked = true);
+        [...routeListEl.children].forEach(div => div.classList.remove('off'));
+        renderPlots();
+      };
+      selNoneBtn.onclick = () => {
+        if (!solverSnap || !solverSnap.routes) return;
+        visible = solverSnap.routes.map(() => false);
+        [...routeListEl.querySelectorAll('input[type=checkbox]')].forEach(cb => cb.checked = false);
+        [...routeListEl.children].forEach(div => div.classList.add('off'));
+        renderPlots();
+      };
+
+      deltaModeEl.onchange = () => {
+        if (selectedSnapIdx >= 0) selectSnapshot(selectedSnapIdx);
+      };
+      violOnlyEl.onchange = () => { buildRouteList(); };
+      drawNodesEl.onchange = renderPlots;
+      drawDepotEl.onchange = renderPlots;
+
+      async function loadAll() {
+        if (!runId) throw new Error('missing run_id');
+        titleEl.textContent = `run_id=${runId}`;
+        const [runRes, instRes, snapRes] = await Promise.all([
+          fetch(`/api/gen5v5/run/${runId}`).then(r => r.json()),
+          fetch(`/api/gen5v5/instance/${runId}`).then(r => r.json()),
+          fetch(`/api/gen5v5/run/${runId}/snapshots`).then(r => r.json()),
+        ]);
+        inst = instRes;
+        snapshots = snapRes;
+        const notes = (runRes.notes || '');
+        const cfg = (runRes.config_summary || '');
+        window._runArgs = (runRes.args || null);
+        metaEl.textContent = `${runRes.instance} | ${cfg}${cfg && notes ? ' | ' : ''}${notes}`;
+        resizeCanvases();
+        renderProgressTable();
+      }
+
+      loadAll().catch(err => { metaEl.textContent = 'ERROR: ' + err.message; });
+      window.addEventListener('resize', () => resizeCanvases());
+    </script>
+  </body>
+</html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>V5 Batch Runner</title>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #161a1f;
+        --text: #eaeaea;
+        --muted: #9aa2ad;
+        --border: #242a31;
+        --accent: #4caf50;
+      }
+      body { font-family: "Inter", system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 16px; }
+      select, button { background: #0f1318; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { padding: 8px; border-bottom: 1px solid var(--border); text-align: left; font-size: 13px; }
+      th { background: var(--panel); color: var(--muted); }
+      tr:hover { background: #11151b; }
+      #log { font-size: 12px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <h2>V5 Batch Runner</h2>
+    <div>
+      <label>Folder: <select id="folder"></select></label>
+      <label>Instance: <select id="instance"></select></label>
+      <label>Seed: <input type="number" id="seed" style="width:80px; background:#0f1318; color:var(--text); border:1px solid var(--border); border-radius:4px;"/></label>
+      <button id="run">Run solver</button>
+      <button id="refresh">Refresh summary</button>
+    </div>
+    <table id="summary">
+      <thead>
+        <tr>
+          <th>Instance</th>
+          <th>Solver Cost</th>
+          <th>BKS</th>
+          <th>Gap %</th>
+          <th>Coverage %</th>
+          <th>Edges covered</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="log"></div>
+    <script>
+      const folderSel = document.getElementById('folder');
+      const instSel = document.getElementById('instance');
+      const runBtn = document.getElementById('run');
+      const refreshBtn = document.getElementById('refresh');
+      const seedInput = document.getElementById('seed');
+      const tbody = document.querySelector('#summary tbody');
+      const logEl = document.getElementById('log');
+
+      const api = (path, opts={}) => fetch(path, opts).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); });
+      const log = msg => { logEl.textContent = msg; };
+
+      function loadFolders() {
+        api('/folders').then(folders => {
+          folderSel.innerHTML = '';
+          folders.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f; opt.textContent = f;
+            folderSel.appendChild(opt);
+          });
+          loadInstances();
+        });
+      }
+
+      function loadInstances() {
+        const folder = folderSel.value;
+        api(`/instances?folder=${encodeURIComponent(folder)}`).then(list => {
+          instSel.innerHTML = '';
+          list.forEach(item => {
+            const opt = document.createElement('option');
+            opt.value = item.vrp;
+            opt.textContent = item.name;
+            instSel.appendChild(opt);
+          });
+          if (list.length > 0) {
+            instSel.value = list[0].vrp;
+          }
+          refreshSummary();
+        });
+      }
+
+      function refreshSummary() {
+        tbody.innerHTML = '';
+        const folder = folderSel.value;
+        api(`/instances?folder=${encodeURIComponent(folder)}`).then(list => {
+          list.forEach(item => {
+            api(`/summary?instance=${encodeURIComponent(item.vrp)}`).then(res => {
+              const tr = document.createElement('tr');
+              tr.innerHTML = `
+                <td><a href="/?instance=${encodeURIComponent(item.vrp)}" style="color: var(--accent); text-decoration: none;">${res.instance}</a></td>
+                <td>${res.solver_cost ?? '-'}</td>
+                <td>${res.bks_cost ?? '-'}</td>
+                <td>${res.gap_pct ? res.gap_pct.toFixed(2) : '-'}</td>
+                <td>${res.coverage_pct ? res.coverage_pct.toFixed(2) : '-'}</td>
+                <td>${res.covered_edges}/${res.total_edges}</td>
+              `;
+              tbody.appendChild(tr);
+            }).catch(err => log(err.message));
+          });
+        });
+      }
+
+      runBtn.onclick = () => {
+        const inst = instSel.value;
+        const seed = seedInput.value;
+        log(`Running ${inst} ...`);
+        api(`/run?instance=${encodeURIComponent(inst)}${seed ? '&seed='+seed : ''}`, {method:'POST'})
+          .then(() => { log(`Completed ${inst}`); refreshSummary(); })
+          .catch(err => log(err.message));
+      };
+
+      refreshBtn.onclick = refreshSummary;
+      folderSel.onchange = loadInstances;
+
+      loadFolders();
+    </script>
+  </body>
+</html>

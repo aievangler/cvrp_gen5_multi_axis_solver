@@ -1,0 +1,225 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>V5 Viewer</title>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #161a1f;
+        --text: #eaeaea;
+        --muted: #9aa2ad;
+        --border: #242a31;
+        --solver: #f15a5a;
+        --bks: #7f8fa4;
+        --depot: #4caf50;
+      }
+      body { font-family: "Inter", system-ui, sans-serif; display: flex; gap: 16px; background: var(--bg); color: var(--text); }
+      #controls { width: 260px; background: var(--panel); padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+      #controls h3 { margin: 8px 0; color: var(--text); }
+      label { color: var(--muted); font-size: 13px; }
+      input, select, button { background: #0f1318; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; }
+      button { cursor: pointer; }
+      #canvas { border: 1px solid var(--border); flex: 1; height: 720px; position: relative; background: #0f1318; border-radius: 8px; }
+      #log { font-size: 12px; max-height: 240px; overflow: auto; border: 1px solid var(--border); padding: 8px; background: #0f1318; color: var(--muted); border-radius: 6px; }
+      .tooltip { position: absolute; pointer-events: none; background: rgba(20,24,30,0.9); color: var(--text); padding: 6px 8px; border-radius: 4px; font-size: 12px; border: 1px solid var(--border); }
+    </style>
+  </head>
+  <body>
+    <div id="controls">
+      <h3>Run</h3>
+      <label>Instance:
+        <select id="instance"></select>
+      </label><br />
+      <label>Seed: <input type="number" id="seed" /></label><br />
+      <button id="run">Run solver</button>
+      <h3>Layers</h3>
+      <label><input type="checkbox" id="layer-solver" checked> Solver</label><br />
+      <label><input type="checkbox" id="layer-bks" checked> BKS</label><br />
+      <label><input type="checkbox" id="show-labels"> Show node ids</label><br />
+      <h3>Info</h3>
+      <div id="info"></div>
+      <h3>Log</h3>
+      <div id="log"></div>
+    </div>
+    <div id="canvas">
+      <svg id="svg" width="100%" height="700"></svg>
+      <div id="tooltip" class="tooltip" style="display:none;"></div>
+    </div>
+    <div id="details" style="position:absolute; left:0; right:0; top:740px; padding:8px; border-top:1px solid var(--border); font-family: monospace; font-size: 12px; color: var(--muted);"></div>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+      const api = (path, opts={}) => fetch(path, opts).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); });
+      const instSel = document.getElementById('instance');
+      const runBtn = document.getElementById('run');
+      const seedInput = document.getElementById('seed');
+      const layerSolver = document.getElementById('layer-solver');
+      const layerBks = document.getElementById('layer-bks');
+      const showLabels = document.getElementById('show-labels');
+      const svg = d3.select('#svg');
+      const tooltip = document.getElementById('tooltip');
+      const info = document.getElementById('info');
+      const details = document.getElementById('details');
+      const logDiv = document.getElementById('log');
+
+      let currentData = {};
+      let selected = null; // {layer: 'solver'|'bks', routeIdx: number}
+
+      function log(msg) { logDiv.textContent += msg + "\\n"; logDiv.scrollTop = logDiv.scrollHeight; }
+
+      function varText(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#eaeaea';
+      }
+
+      function draw() {
+        const layers = [];
+        if (layerBks.checked && currentData.bks) layers.push({data: currentData.bks, color: getComputedStyle(document.documentElement).getPropertyValue('--bks').trim()});
+        if (layerSolver.checked && currentData.solver) layers.push({data: currentData.solver, color: getComputedStyle(document.documentElement).getPropertyValue('--solver').trim()});
+        svg.selectAll('*').remove();
+        if (layers.length === 0) return;
+        const coords = layers[0].data.coords;
+        const demands = layers[0].data.demands || {};
+        const nodes = Object.entries(coords).map(([id, xy]) => ({id, x: xy[0], y: xy[1], demand: demands[id] || demands[parseInt(id)] || 0}));
+        const width = svg.node().clientWidth || 800;
+        const height = svg.node().clientHeight || 700;
+        const pad = 20;
+        const xScale = d3.scaleLinear().domain(d3.extent(nodes, d => d.x)).range([pad, width - pad]);
+        const yScale = d3.scaleLinear().domain(d3.extent(nodes, d => d.y)).range([height - pad, pad]);
+
+        const g = svg.append('g');
+
+        // routes
+        layers.forEach(layer => {
+          const color = layer.color;
+          layer.data.routes.forEach((rt, ridx) => {
+            const includeDepot = selected && selected.layer === layer.data.layer && selected.routeIdx === ridx;
+            const seq = includeDepot ? [layer.data.depot, ...rt.nodes, layer.data.depot] : rt.nodes;
+            const pathData = seq.map(nid => {
+              const pt = coords[nid] || coords[String(nid)];
+              return pt ? [xScale(pt[0]), yScale(pt[1])] : null;
+            }).filter(Boolean);
+            if (pathData.length >= 2) {
+              const line = d3.line();
+              g.append('path')
+                .attr('d', line(pathData))
+                .attr('fill', 'none')
+                .attr('stroke', color)
+                .attr('stroke-width', includeDepot ? 2.5 : 1.3)
+                .attr('stroke-opacity', includeDepot ? 0.9 : 0.6);
+            }
+            if (rt.nodes.length > 0) {
+              const startPt = coords[rt.nodes[0]] || coords[String(rt.nodes[0])];
+              const endPt = coords[rt.nodes[rt.nodes.length - 1]] || coords[String(rt.nodes[rt.nodes.length - 1])];
+              if (startPt) {
+                g.append('circle')
+                  .attr('cx', xScale(startPt[0]))
+                  .attr('cy', yScale(startPt[1]))
+                  .attr('r', includeDepot ? 7 : 6)
+                  .attr('fill', color);
+              }
+              if (endPt) {
+                g.append('circle')
+                  .attr('cx', xScale(endPt[0]))
+                  .attr('cy', yScale(endPt[1]))
+                  .attr('r', includeDepot ? 8 : 7)
+                  .attr('fill', 'none')
+                  .attr('stroke', color)
+                  .attr('stroke-width', includeDepot ? 2.5 : 2);
+              }
+            }
+          });
+        });
+
+        // nodes
+        const depotId = String(layers[0].data.depot);
+        const nodesSel = g.selectAll('circle.node').data(nodes).enter().append('circle')
+          .attr('class', 'node')
+          .attr('cx', d => xScale(d.x))
+          .attr('cy', d => yScale(d.y))
+          .attr('r', d => d.id === depotId ? 8 : 3)
+          .attr('fill', d => d.id === depotId ? 'var(--depot)' : '#888')
+          .attr('stroke', d => d.id === depotId ? '#2e7d32' : 'none');
+
+        nodesSel.on('mouseover', (event, d) => {
+          tooltip.style.display = 'block';
+          tooltip.textContent = `id: ${d.id}  demand: ${d.demand ?? 0}`;
+          const rect = svg.node().getBoundingClientRect();
+          tooltip.style.left = `${event.clientX - rect.left + 10}px`;
+          tooltip.style.top = `${event.clientY - rect.top + 10}px`;
+        }).on('mouseout', () => {
+          tooltip.style.display = 'none';
+        }).on('click', (event, d) => {
+          const nodeId = d.id;
+          let found = null;
+          if (layerSolver.checked && currentData.solver) {
+            currentData.solver.routes.forEach((rt, idx) => {
+              if (rt.nodes.map(String).includes(String(nodeId))) {
+                found = {layer: 'solver', routeIdx: idx};
+              }
+            });
+          }
+          if (!found && layerBks.checked && currentData.bks) {
+            currentData.bks.routes.forEach((rt, idx) => {
+              if (rt.nodes.map(String).includes(String(nodeId))) {
+                found = {layer: 'bks', routeIdx: idx};
+              }
+            });
+          }
+          selected = found;
+          draw();
+        });
+
+        if (showLabels.checked) {
+          g.selectAll('text.label').data(nodes).enter().append('text')
+            .attr('class', 'label')
+            .attr('x', d => xScale(d.x) + 6)
+            .attr('y', d => yScale(d.y) - 6)
+            .attr('font-size', 10)
+            .attr('fill', varText('--muted'))
+            .text(d => d.id);
+        }
+
+        const solverCost = currentData.solver ? currentData.solver.cost : '-';
+        const bksCost = currentData.bks ? currentData.bks.cost : '-';
+        info.textContent = `Solver cost: ${solverCost} | BKS: ${bksCost}`;
+        details.textContent = [
+          `Analyzer:`,
+          `eval_solution.py --instance ${instSel.value} --solution out/v5/${(instSel.value.split('/').pop()||'').replace('.vrp','.sol')} --per-route`,
+          `report_bks_coverage.py --instances-dir data/instances/A`,
+          `run_analyzer.py --db runs.sqlite --instance ${instSel.value} --run-id <id> --bks ${instSel.value.replace('.vrp','.sol')}`
+        ].join('\\n');
+      }
+
+      function loadSolution(layer) {
+        const inst = instSel.value;
+        return api(`/solution?instance=${encodeURIComponent(inst)}&layer=${layer}`).then(data => { currentData[layer] = data; draw(); });
+      }
+
+      api('/instances').then(list => {
+        list.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = item.vrp;
+          opt.textContent = item.name;
+          instSel.appendChild(opt);
+        });
+        loadSolution('bks').catch(()=>{});
+      });
+
+      runBtn.onclick = () => {
+        const inst = instSel.value;
+        log(`Running solver on ${inst}...`);
+        api(`/run?instance=${encodeURIComponent(inst)}${seedInput.value ? '&seed='+seedInput.value : ''}`, {method:'POST'})
+          .then(() => {
+            log(`Completed run for ${inst}`);
+            return loadSolution('solver');
+          })
+          .catch(err => log(`Error: ${err}`));
+      };
+
+      layerSolver.onchange = draw;
+      layerBks.onchange = draw;
+      showLabels.onchange = draw;
+
+    </script>
+  </body>
+</html>
